@@ -23,6 +23,12 @@ class CustomUser(AbstractBaseUser, PermissionsMixin, TimeStampModel):
 
     class Meta:
         db_table = "users"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(point__gte=0),
+                name="user_point_non_negative",
+            ),
+        ]
 
     def __str__(self):
         return self.email
