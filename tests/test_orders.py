@@ -119,12 +119,34 @@ class TestOrderCreateAPI:
         assert user.point == 1_000_000 - 300000
         assert seller.point == 1_000_000 + 300000
 
+    def test_create_order_from_buy_bid(self, api_client, user, seller, product_size):
+        """BUY 입찰에 대해 판매자가 매칭하면, 입찰자=buyer, 요청자=seller"""
+        from orders.models import Bidding
+
+        buy_bid = Bidding.objects.create(
+            user=user,
+            product_size=product_size,
+            position=Bidding.Position.BUY,
+            price=300000,
+        )
+        api_client.force_authenticate(user=seller)
+        response = api_client.post(self.URL, {"bidding_id": buy_bid.id})
+        assert response.status_code == 201
+        assert response.json()["code"] == "OK"
+
+        user.refresh_from_db()
+        seller.refresh_from_db()
+        assert user.point == 1_000_000 - 300000
+        assert seller.point == 1_000_000 + 300000
+
     def test_create_order_already_contracted(self, buyer_client, seller, product_size):
         bid = self._create_sell_bid(seller, product_size)
         buyer_client.post(self.URL, {"bidding_id": bid.id})
         response = buyer_client.post(self.URL, {"bidding_id": bid.id})
         assert response.status_code == 409
-        assert response.json()["code"] == "CONFLICT"
+        data = response.json()
+        assert data["code"] == "CONFLICT"
+        assert data["message"] == "Bidding already contracted."
 
     def test_create_order_insufficient_point(self, buyer_client, user, seller, product_size):
         user.point = 100
@@ -132,7 +154,9 @@ class TestOrderCreateAPI:
         bid = self._create_sell_bid(seller, product_size)
         response = buyer_client.post(self.URL, {"bidding_id": bid.id})
         assert response.status_code == 400
-        assert response.json()["code"] == "INSUFFICIENT_POINT"
+        data = response.json()
+        assert data["code"] == "INSUFFICIENT_POINT"
+        assert data["message"] == "Insufficient points."
 
     def test_create_order_bidding_not_found(self, buyer_client):
         response = buyer_client.post(self.URL, {"bidding_id": 99999})
@@ -149,6 +173,9 @@ class TestOrderCreateAPI:
         )
         response = buyer_client.post(self.URL, {"bidding_id": own_bid.id})
         assert response.status_code == 400
+        data = response.json()
+        assert data["code"] == "INVALID_PARAMETER"
+        assert data["message"] == "Cannot match your own bid."
 
 
 @pytest.mark.django_db

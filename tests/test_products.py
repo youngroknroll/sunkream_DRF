@@ -140,7 +140,9 @@ class TestWishlistAPI:
         authenticated_client.post(f"/api/v1/products/{product.id}/wishlist/")
         response = authenticated_client.post(f"/api/v1/products/{product.id}/wishlist/")
         assert response.status_code == 409
-        assert response.json()["code"] == "CONFLICT"
+        data = response.json()
+        assert data["code"] == "CONFLICT"
+        assert data["message"] == "Already in wishlist."
 
     def test_remove_wishlist(self, authenticated_client):
         product = ProductFactory()
