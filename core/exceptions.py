@@ -1,5 +1,6 @@
-from rest_framework.views import exception_handler
 from rest_framework import status
+from rest_framework.exceptions import APIException
+from rest_framework.views import exception_handler
 
 ERROR_CODE_MAP = {
     status.HTTP_400_BAD_REQUEST: "INVALID_PARAMETER",
@@ -10,13 +11,28 @@ ERROR_CODE_MAP = {
 }
 
 
+class ConflictError(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = "Resource conflict."
+    default_code = "conflict"
+
+
+class InsufficientPointError(APIException):
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_detail = "Insufficient points."
+    default_code = "insufficient_point"
+
+
 def custom_exception_handler(exc, context):
     response = exception_handler(exc, context)
 
     if response is None:
         return response
 
-    error_code = ERROR_CODE_MAP.get(response.status_code, "ERROR")
+    if isinstance(exc, InsufficientPointError):
+        error_code = "INSUFFICIENT_POINT"
+    else:
+        error_code = ERROR_CODE_MAP.get(response.status_code, "ERROR")
 
     if isinstance(response.data, dict):
         detail = response.data.get("detail", str(response.data))

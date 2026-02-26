@@ -1,9 +1,11 @@
-from django.db import transaction
-from django.db.models import Count
+from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
+from django.db.models import Count, F
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import NotFound, ValidationError
-from rest_framework.response import Response
 
+from core.exceptions import ConflictError, InsufficientPointError
+from core.mixins import SuccessResponseListMixin
 from core.responses import success_response
 from orders.models import Bidding, Order
 from orders.serializers import (
@@ -12,10 +14,12 @@ from orders.serializers import (
     OrderCreateSerializer,
     OrderListSerializer,
 )
-from products.models import ProductSize
+from products.models import Product, ProductSize
+
+User = get_user_model()
 
 
-class BidListCreateView(generics.ListCreateAPIView):
+class BidListCreateView(SuccessResponseListMixin, generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_serializer_class(self):
@@ -30,24 +34,16 @@ class BidListCreateView(generics.ListCreateAPIView):
             .order_by("-created_at")
         )
 
-    def list(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = BidListSerializer(page, many=True)
-            paginated = self.paginator.get_paginated_response(serializer.data)
-            return success_response(data={
-                "count": paginated.data["count"],
-                "results": paginated.data["results"],
-            })
-        serializer = BidListSerializer(queryset, many=True)
-        return success_response(data={"results": serializer.data})
-
     def create(self, request, *args, **kwargs):
         serializer = BidCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        product_size = ProductSize.objects.get(pk=serializer.validated_data["product_size_id"])
+        try:
+            product_size = ProductSize.objects.get(
+                pk=serializer.validated_data["product_size_id"]
+            )
+        except ProductSize.DoesNotExist:
+            raise NotFound("Product size not found.")
         Bidding.objects.create(
             user=request.user,
             product_size=product_size,
@@ -76,10 +72,7 @@ class OrderCreateView(generics.CreateAPIView):
                 raise NotFound("Bidding not found.")
 
             if bidding.status == Bidding.Status.CONTRACTED:
-                return Response(
-                    {"code": "CONFLICT", "message": "Bidding already contracted."},
-                    status=status.HTTP_409_CONFLICT,
-                )
+                raise ConflictError("Bidding already contracted.")
 
             if bidding.user == request.user:
                 raise ValidationError("Cannot match your own bid.")
@@ -89,16 +82,15 @@ class OrderCreateView(generics.CreateAPIView):
             else:
                 buyer, seller = bidding.user, request.user
 
-            if buyer.point < bidding.price:
-                return Response(
-                    {"code": "INSUFFICIENT_POINT", "message": "Insufficient points."},
-                    status=status.HTTP_400_BAD_REQUEST,
+            try:
+                User.objects.filter(pk=buyer.pk).update(
+                    point=F("point") - bidding.price
                 )
-
-            buyer.point -= bidding.price
-            seller.point += bidding.price
-            buyer.save(update_fields=["point"])
-            seller.save(update_fields=["point"])
+                User.objects.filter(pk=seller.pk).update(
+                    point=F("point") + bidding.price
+                )
+            except IntegrityError:
+                raise InsufficientPointError()
 
             bidding.status = Bidding.Status.CONTRACTED
             bidding.save(update_fields=["status"])
@@ -121,15 +113,21 @@ class MyOrdersView(generics.GenericAPIView):
 
     def get(self, request):
         user = request.user
-        buy_orders = Order.objects.filter(buyer=user).select_related(
-            "bidding__product_size__product", "bidding__product_size__size"
+        buy_orders = (
+            Order.objects.filter(buyer=user)
+            .select_related("bidding__product_size__product", "bidding__product_size__size")
+            .order_by("-created_at")[:100]
         )
-        sell_orders = Order.objects.filter(seller=user).select_related(
-            "bidding__product_size__product", "bidding__product_size__size"
+        sell_orders = (
+            Order.objects.filter(seller=user)
+            .select_related("bidding__product_size__product", "bidding__product_size__size")
+            .order_by("-created_at")[:100]
         )
-        active_bids = Bidding.objects.filter(
-            user=user, status=Bidding.Status.ON_BIDDING
-        ).select_related("product_size__product", "product_size__size")
+        active_bids = (
+            Bidding.objects.filter(user=user, status=Bidding.Status.ON_BIDDING)
+            .select_related("product_size__product", "product_size__size")
+            .order_by("-created_at")[:100]
+        )
 
         return success_response(data={
             "user_name": user.name,
@@ -145,15 +143,13 @@ class PriceHistoryView(generics.GenericAPIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, product_id):
-        from products.models import Product
-
         if not Product.objects.filter(pk=product_id).exists():
             raise NotFound("Product not found.")
 
         orders = (
             Order.objects.filter(bidding__product_size__product_id=product_id)
             .select_related("bidding__product_size__size")
-            .order_by("-created_at")
+            .order_by("-created_at")[:100]
         )
 
         order_history = [

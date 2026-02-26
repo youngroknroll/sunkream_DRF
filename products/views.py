@@ -4,6 +4,8 @@ from rest_framework import generics, permissions, status
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 
+from core.exceptions import ConflictError
+from core.mixins import SuccessResponseListMixin
 from core.responses import success_response
 from products.models import Brand, Product, Wishlist
 from products.serializers import (
@@ -13,7 +15,7 @@ from products.serializers import (
 )
 
 
-class ProductListView(generics.ListAPIView):
+class ProductListView(SuccessResponseListMixin, generics.ListAPIView):
     serializer_class = ProductListSerializer
     permission_classes = [permissions.AllowAny]
 
@@ -33,21 +35,6 @@ class ProductListView(generics.ListAPIView):
             qs = qs.filter(name__icontains=search)
 
         return qs.distinct()
-
-    def list(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            paginated = self.paginator.get_paginated_response(serializer.data)
-            return success_response(
-                data={
-                    "count": paginated.data["count"],
-                    "results": paginated.data["results"],
-                }
-            )
-        serializer = self.get_serializer(queryset, many=True)
-        return success_response(data={"results": serializer.data})
 
 
 class ProductDetailView(generics.RetrieveAPIView):
@@ -92,10 +79,7 @@ class WishlistView(generics.GenericAPIView):
         try:
             Wishlist.objects.create(user=request.user, product=product)
         except IntegrityError:
-            return Response(
-                {"code": "CONFLICT", "message": "Already in wishlist."},
-                status=status.HTTP_409_CONFLICT,
-            )
+            raise ConflictError("Already in wishlist.")
         return success_response(
             message="Wishlist added.",
             status_code=status.HTTP_201_CREATED,
