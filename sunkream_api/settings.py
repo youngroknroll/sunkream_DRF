@@ -111,6 +111,3 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
 }
-
-# Kakao OAuth
-KAKAO_REST_API_KEY = env("KAKAO_REST_API_KEY", default="")
