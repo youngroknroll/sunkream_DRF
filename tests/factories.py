@@ -53,3 +53,13 @@ class ProductSizeFactory(factory.django.DjangoModelFactory):
 
     product = factory.SubFactory(ProductFactory)
     size = factory.SubFactory(SizeFactory)
+
+
+class BiddingFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = "orders.Bidding"
+
+    user         = factory.SubFactory(UserFactory)
+    product_size = factory.SubFactory(ProductSizeFactory)
+    position     = "BUY"
+    price        = 300000
