@@ -29,21 +29,9 @@ def custom_exception_handler(exc, context):
     if response is None:
         return response
 
-    if isinstance(exc, InsufficientPointError):
-        error_code = "INSUFFICIENT_POINT"
-    else:
-        error_code = ERROR_CODE_MAP.get(response.status_code, "ERROR")
-
-    if isinstance(response.data, dict):
-        detail = response.data.get("detail", str(response.data))
-    elif isinstance(response.data, list):
-        detail = response.data[0] if response.data else "An error occurred."
-    else:
-        detail = str(response.data)
-
-    response.data = {
-        "code": error_code,
-        "message": str(detail),
-    }
+    error_code = "INSUFFICIENT_POINT" if isinstance(exc, InsufficientPointError) else ERROR_CODE_MAP.get(response.status_code, "ERROR")
+    data = response.data
+    detail = data[0] if isinstance(data, list) else data.get("detail", str(data))
+    response.data = {"code": error_code, "message": str(detail)}
 
     return response

@@ -1,7 +1,7 @@
 import requests
 from django.contrib.auth import get_user_model
-from rest_framework import permissions, status
-from rest_framework.response import Response
+from rest_framework import permissions
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -29,10 +29,7 @@ class KakaoLoginView(APIView):
         )
 
         if kakao_response.status_code != 200:
-            return Response(
-                {"code": "UNAUTHORIZED", "message": "Invalid Kakao token."},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
+            raise AuthenticationFailed("Invalid Kakao token.")
 
         kakao_data = kakao_response.json()
         kakao_id = str(kakao_data["id"])

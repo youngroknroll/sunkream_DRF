@@ -142,6 +142,18 @@ class MyOrdersView(generics.GenericAPIView):
 class PriceHistoryView(generics.GenericAPIView):
     permission_classes = [permissions.AllowAny]
 
+    def _bid_aggregates(self, product_id, position, order):
+        return (
+            Bidding.objects.filter(
+                product_size__product_id=product_id,
+                position=position,
+                status=Bidding.Status.ON_BIDDING,
+            )
+            .values("price", "product_size__size__size")
+            .annotate(count=Count("id"))
+            .order_by(order)
+        )
+
     def get(self, request, product_id):
         if not Product.objects.filter(pk=product_id).exists():
             raise NotFound("Product not found.")
@@ -161,27 +173,8 @@ class PriceHistoryView(generics.GenericAPIView):
             for o in orders
         ]
 
-        sell_bids = (
-            Bidding.objects.filter(
-                product_size__product_id=product_id,
-                position=Bidding.Position.SELL,
-                status=Bidding.Status.ON_BIDDING,
-            )
-            .values("price", "product_size__size__size")
-            .annotate(count=Count("id"))
-            .order_by("price")
-        )
-
-        buy_bids = (
-            Bidding.objects.filter(
-                product_size__product_id=product_id,
-                position=Bidding.Position.BUY,
-                status=Bidding.Status.ON_BIDDING,
-            )
-            .values("price", "product_size__size__size")
-            .annotate(count=Count("id"))
-            .order_by("-price")
-        )
+        sell_bids = self._bid_aggregates(product_id, Bidding.Position.SELL, "price")
+        buy_bids  = self._bid_aggregates(product_id, Bidding.Position.BUY, "-price")
 
         return success_response(data={
             "order_history": order_history,

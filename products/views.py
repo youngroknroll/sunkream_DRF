@@ -1,5 +1,6 @@
 from django.db import IntegrityError
 from django.db.models import Count
+from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
@@ -68,14 +69,8 @@ class BrandListView(generics.ListAPIView):
 class WishlistView(generics.GenericAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def _get_product(self, product_id):
-        try:
-            return Product.objects.get(pk=product_id)
-        except Product.DoesNotExist:
-            raise NotFound("Product not found.")
-
     def post(self, request, product_id):
-        product = self._get_product(product_id)
+        product = get_object_or_404(Product, pk=product_id)
         try:
             Wishlist.objects.create(user=request.user, product=product)
         except IntegrityError:
@@ -86,7 +81,7 @@ class WishlistView(generics.GenericAPIView):
         )
 
     def delete(self, request, product_id):
-        product = self._get_product(product_id)
+        product = get_object_or_404(Product, pk=product_id)
         deleted, _ = Wishlist.objects.filter(user=request.user, product=product).delete()
         if not deleted:
             raise NotFound("Wishlist entry not found.")
