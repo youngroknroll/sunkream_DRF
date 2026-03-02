@@ -5,6 +5,7 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from core.exceptions import ConflictError
 from core.responses import success_response
 from users.serializers import KakaoLoginSerializer
 
@@ -37,10 +38,21 @@ class KakaoLoginView(APIView):
         email = kakao_account.get("email", f"{kakao_id}@kakao.user")
         nickname = kakao_account.get("profile", {}).get("nickname", "")
 
-        user, created = User.objects.get_or_create(
-            kakao_id=kakao_id,
-            defaults={"email": email, "name": nickname},
-        )
+        try:
+            user = User.objects.get(kakao_id=kakao_id)
+            created = False
+        except User.DoesNotExist:
+            user, created = User.objects.get_or_create(
+                email=email,
+                defaults={"kakao_id": kakao_id, "name": nickname},
+            )
+            if not created:
+                if user.kakao_id is not None:
+                    raise ConflictError(
+                        "This email is already linked to another Kakao account."
+                    )
+                user.kakao_id = kakao_id
+                user.save(update_fields=["kakao_id"])
 
         refresh = RefreshToken.for_user(user)
 
