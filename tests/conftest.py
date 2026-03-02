@@ -4,9 +4,19 @@ import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
-from tests.factories import BiddingFactory, ProductSizeFactory, UserFactory
+from orders.models import Order
+from tests.factories import BiddingFactory, ProductFactory, ProductSizeFactory, UserFactory
 
 User = get_user_model()
+NOT_FOUND_ID = 99999
+VALID_KAKAO_ACCESS_TOKEN = "valid_kakao_token"
+INVALID_KAKAO_ACCESS_TOKEN = "invalid_token"
+KAKAO_LOGIN_URL = "/api/v1/auth/kakao/"
+BIDS_URL = "/api/v1/bids/"
+ORDERS_URL = "/api/v1/orders/"
+MY_ORDERS_URL = "/api/v1/me/orders/"
+PRODUCTS_URL = "/api/v1/products/"
+BRANDS_URL = "/api/v1/products/brands/"
 
 _MOCK_KAKAO_USER_INFO = {
     "id": 123456789,
@@ -52,6 +62,149 @@ def seller_client(seller):
 
 
 @pytest.fixture
+def make_bid_data(product_size):
+    def _build(**overrides):
+        data = {
+            "product_size_id": product_size.id,
+            "position": "BUY",
+            "price": 300000,
+        }
+        data.update(overrides)
+        return data
+
+    return _build
+
+
+@pytest.fixture
+def not_found_id():
+    return NOT_FOUND_ID
+
+
+@pytest.fixture
+def kakao_access_token():
+    return VALID_KAKAO_ACCESS_TOKEN
+
+
+@pytest.fixture
+def invalid_kakao_access_token():
+    return INVALID_KAKAO_ACCESS_TOKEN
+
+
+@pytest.fixture
+def make_kakao_login_payload():
+    def _build(access_token=None):
+        if access_token is None:
+            return {}
+        return {"access_token": access_token}
+
+    return _build
+
+
+@pytest.fixture
+def bid_data(make_bid_data):
+    return make_bid_data()
+
+
+@pytest.fixture
+def make_order_payload():
+    def _build(bidding_id):
+        return {"bidding_id": bidding_id}
+
+    return _build
+
+
+@pytest.fixture
+def assert_api_error():
+    def _assert(response, status, code, message=None):
+        assert response.status_code == status
+        data = response.json()
+        assert data["code"] == code
+        if message is not None:
+            assert data["message"] == message
+
+    return _assert
+
+
+@pytest.fixture
+def auth_api():
+    class AuthAPI:
+        kakao_login_url = KAKAO_LOGIN_URL
+
+        def kakao_login(self, client, payload):
+            return client.post(self.kakao_login_url, payload)
+
+    return AuthAPI()
+
+
+@pytest.fixture
+def bids_api():
+    class BidsAPI:
+        bids_url = BIDS_URL
+
+        def create(self, client, payload):
+            return client.post(self.bids_url, payload)
+
+        def list_my(self, client):
+            return client.get(self.bids_url)
+
+    return BidsAPI()
+
+
+@pytest.fixture
+def orders_api(make_order_payload):
+    class OrdersAPI:
+        orders_url = ORDERS_URL
+
+        def create(self, client, bidding_id):
+            return client.post(self.orders_url, make_order_payload(bidding_id))
+
+    return OrdersAPI()
+
+
+@pytest.fixture
+def me_api():
+    class MeAPI:
+        my_orders_url = MY_ORDERS_URL
+
+        def orders(self, client):
+            return client.get(self.my_orders_url)
+
+    return MeAPI()
+
+
+@pytest.fixture
+def products_api():
+    class ProductsAPI:
+        products_url = PRODUCTS_URL
+        brands_url = BRANDS_URL
+
+        def list(self, client, params=None):
+            return client.get(self.products_url, params)
+
+        def detail(self, client, product_id):
+            return client.get(f"{self.products_url}{product_id}/")
+
+        def price_history(self, client, product_id):
+            return client.get(f"{self.products_url}{product_id}/price-history/")
+
+        def brands(self, client):
+            return client.get(self.brands_url)
+
+        def add_wishlist(self, client, product_id):
+            return client.post(f"{self.products_url}{product_id}/wishlist/")
+
+        def remove_wishlist(self, client, product_id):
+            return client.delete(f"{self.products_url}{product_id}/wishlist/")
+
+    return ProductsAPI()
+
+
+@pytest.fixture
+def product(db):
+    return ProductFactory()
+
+
+@pytest.fixture
 def product_size(db):
     return ProductSizeFactory()
 
@@ -69,6 +222,16 @@ def buy_bid(user, product_size):
 @pytest.fixture
 def own_sell_bid(user, product_size):
     return BiddingFactory(user=user, product_size=product_size, position="SELL")
+
+
+@pytest.fixture
+def contracted_sell_bid(user, seller, sell_bid):
+    sell_bid.status = "CONTRACTED"
+    sell_bid.save(update_fields=["status"])
+    Order.objects.create(
+        bidding=sell_bid, buyer=user, seller=seller, price=sell_bid.price,
+    )
+    return sell_bid
 
 
 @pytest.fixture
