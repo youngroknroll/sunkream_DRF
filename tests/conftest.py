@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+import requests
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
@@ -12,6 +13,7 @@ NOT_FOUND_ID = 99999
 VALID_KAKAO_ACCESS_TOKEN = "valid_kakao_token"
 INVALID_KAKAO_ACCESS_TOKEN = "invalid_token"
 KAKAO_LOGIN_URL = "/api/v1/auth/kakao/"
+TOKEN_REFRESH_URL = "/api/v1/auth/token/refresh/"
 BIDS_URL = "/api/v1/bids/"
 ORDERS_URL = "/api/v1/orders/"
 MY_ORDERS_URL = "/api/v1/me/orders/"
@@ -129,9 +131,13 @@ def assert_api_error():
 def auth_api():
     class AuthAPI:
         kakao_login_url = KAKAO_LOGIN_URL
+        token_refresh_url = TOKEN_REFRESH_URL
 
         def kakao_login(self, client, payload):
             return client.post(self.kakao_login_url, payload)
+
+        def token_refresh(self, client, refresh_token):
+            return client.post(self.token_refresh_url, {"refresh": refresh_token})
 
     return AuthAPI()
 
@@ -246,6 +252,15 @@ def mock_kakao_success():
         return MockResponse()
 
     with patch("users.views.requests.get", side_effect=_handler):
+        yield
+
+
+@pytest.fixture
+def mock_kakao_network_error():
+    with patch(
+        "users.views.requests.get",
+        side_effect=requests.ConnectionError("Connection refused"),
+    ):
         yield
 
 

@@ -65,3 +65,29 @@ class TestKakaoLoginAPI:
         response = auth_api.kakao_login(api_client, make_kakao_login_payload(invalid_kakao_access_token))
         assert response.status_code == 401
         assert response.json()["code"] == "UNAUTHORIZED"
+
+    def test_카카오로그인_네트워크오류면_401을_반환한다(
+        self, mock_kakao_network_error, api_client, auth_api, make_kakao_login_payload, kakao_access_token,
+    ):
+        response = auth_api.kakao_login(api_client, make_kakao_login_payload(kakao_access_token))
+        assert response.status_code == 401
+        assert response.json()["code"] == "UNAUTHORIZED"
+
+
+@pytest.mark.django_db
+class TestTokenRefreshAPI:
+    def test_토큰갱신_유효한_리프레시토큰이면_새_액세스토큰을_반환한다(
+        self, mock_kakao_success, api_client, auth_api, make_kakao_login_payload, kakao_access_token,
+    ):
+        login_response = auth_api.kakao_login(api_client, make_kakao_login_payload(kakao_access_token))
+        refresh_token = login_response.json()["data"]["refresh"]
+
+        response = auth_api.token_refresh(api_client, refresh_token)
+        assert response.status_code == 200
+        assert "access" in response.json()
+
+    def test_토큰갱신_유효하지않은_리프레시토큰이면_401을_반환한다(
+        self, api_client, auth_api,
+    ):
+        response = auth_api.token_refresh(api_client, "invalid-refresh-token")
+        assert response.status_code == 401
