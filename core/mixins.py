@@ -10,6 +10,8 @@ class SuccessResponseListMixin:
             paginated = self.paginator.get_paginated_response(serializer.data)
             return success_response(data={
                 "count": paginated.data["count"],
+                "next": paginated.data.get("next"),
+                "previous": paginated.data.get("previous"),
                 "results": paginated.data["results"],
             })
         serializer = self.get_serializer(queryset, many=True)
