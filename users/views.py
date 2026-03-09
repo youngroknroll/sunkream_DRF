@@ -23,11 +23,14 @@ class KakaoLoginView(APIView):
 
         kakao_token = serializer.validated_data["access_token"]
 
-        kakao_response = requests.get(
-            KAKAO_USER_INFO_URL,
-            headers={"Authorization": f"Bearer {kakao_token}"},
-            timeout=5,
-        )
+        try:
+            kakao_response = requests.get(
+                KAKAO_USER_INFO_URL,
+                headers={"Authorization": f"Bearer {kakao_token}"},
+                timeout=5,
+            )
+        except requests.RequestException:
+            raise AuthenticationFailed("Failed to connect to Kakao.")
 
         if kakao_response.status_code != 200:
             raise AuthenticationFailed("Invalid Kakao token.")
