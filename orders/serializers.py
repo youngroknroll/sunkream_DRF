@@ -20,6 +20,16 @@ class BidListSerializer(serializers.ModelSerializer):
         fields = ["id", "product_name", "size", "position", "status", "price", "created_at"]
 
 
+VALID_STATUS_TRANSITIONS = {
+    Order.Status.INSPECTION: Order.Status.IN_TRANSIT,
+    Order.Status.IN_TRANSIT: Order.Status.DELIVERED,
+}
+
+
+class OrderStatusUpdateSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=Order.Status.choices)
+
+
 class OrderCreateSerializer(serializers.Serializer):
     bidding_id = serializers.IntegerField()
 

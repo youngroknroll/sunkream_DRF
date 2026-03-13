@@ -4,7 +4,7 @@ from django.db.models import Count, F
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import NotFound, ValidationError
 
-from core.exceptions import ConflictError, InsufficientPointError
+from core.exceptions import ConflictError, ForbiddenError, InsufficientPointError
 from core.mixins import SuccessResponseListMixin
 from core.responses import success_response
 from orders.models import Bidding, Order
@@ -13,6 +13,8 @@ from orders.serializers import (
     BidListSerializer,
     OrderCreateSerializer,
     OrderListSerializer,
+    OrderStatusUpdateSerializer,
+    VALID_STATUS_TRANSITIONS,
 )
 from products.models import Product, ProductSize
 
@@ -137,6 +139,49 @@ class MyOrdersView(generics.GenericAPIView):
             "sell_orders": OrderListSerializer(sell_orders, many=True).data,
             "active_bids": BidListSerializer(active_bids, many=True).data,
         })
+
+
+class OrderStatusUpdateView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, order_id):
+        try:
+            order = Order.objects.get(pk=order_id)
+        except Order.DoesNotExist:
+            raise NotFound("Order not found.")
+
+        if order.seller != request.user:
+            raise ForbiddenError("Only the seller can update order status.")
+
+        serializer = OrderStatusUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_status = serializer.validated_data["status"]
+
+        if VALID_STATUS_TRANSITIONS.get(order.status) != new_status:
+            raise ValidationError("Invalid status transition.")
+
+        order.status = new_status
+        order.save(update_fields=["status"])
+
+        return success_response(data={"id": order.id, "status": order.status}, message="Order status updated.")
+
+
+class BidCancelView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, bid_id):
+        try:
+            bidding = Bidding.objects.get(pk=bid_id, user=request.user)
+        except Bidding.DoesNotExist:
+            raise NotFound("Bidding not found.")
+
+        if bidding.status != Bidding.Status.ON_BIDDING:
+            raise ConflictError("Only active bids can be cancelled.")
+
+        bidding.status = Bidding.Status.CANCELLED
+        bidding.save(update_fields=["status"])
+
+        return success_response(message="Bid cancelled.")
 
 
 class PriceHistoryView(generics.GenericAPIView):

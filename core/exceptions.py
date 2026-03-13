@@ -17,6 +17,12 @@ class ConflictError(APIException):
     default_code = "conflict"
 
 
+class ForbiddenError(APIException):
+    status_code = status.HTTP_403_FORBIDDEN
+    default_detail = "Permission denied."
+    default_code = "forbidden"
+
+
 class InsufficientPointError(APIException):
     status_code = status.HTTP_400_BAD_REQUEST
     default_detail = "Insufficient points."

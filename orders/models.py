@@ -8,6 +8,7 @@ class Bidding(TimeStampModel):
     class Status(models.TextChoices):
         ON_BIDDING = "ON_BIDDING", "On Bidding"
         CONTRACTED = "CONTRACTED", "Contracted"
+        CANCELLED = "CANCELLED", "Cancelled"
 
     class Position(models.TextChoices):
         BUY = "BUY", "Buy"

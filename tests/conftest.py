@@ -64,6 +64,23 @@ def seller_client(seller):
 
 
 @pytest.fixture
+def admin_user(db):
+    return User.objects.create_user(
+        email="admin@example.com",
+        password="adminpass123",
+        name="Admin User",
+        is_staff=True,
+    )
+
+
+@pytest.fixture
+def admin_client(admin_user):
+    client = APIClient()
+    client.force_authenticate(user=admin_user)
+    return client
+
+
+@pytest.fixture
 def make_bid_data(product_size):
     def _build(**overrides):
         data = {
@@ -153,6 +170,9 @@ def bids_api():
         def list_my(self, client):
             return client.get(self.bids_url)
 
+        def cancel(self, client, bid_id):
+            return client.delete(f"{self.bids_url}{bid_id}/")
+
     return BidsAPI()
 
 
@@ -163,6 +183,9 @@ def orders_api(make_order_payload):
 
         def create(self, client, bidding_id):
             return client.post(self.orders_url, make_order_payload(bidding_id))
+
+        def update_status(self, client, order_id, new_status):
+            return client.patch(f"{self.orders_url}{order_id}/status/", {"status": new_status})
 
     return OrdersAPI()
 
@@ -201,6 +224,15 @@ def products_api():
 
         def remove_wishlist(self, client, product_id):
             return client.delete(f"{self.products_url}{product_id}/wishlist/")
+
+        def create_product(self, client, payload):
+            return client.post(self.products_url, payload, format="json")
+
+        def update_product(self, client, product_id, payload):
+            return client.patch(f"{self.products_url}{product_id}/", payload, format="json")
+
+        def delete_product(self, client, product_id):
+            return client.delete(f"{self.products_url}{product_id}/")
 
     return ProductsAPI()
 

@@ -1,5 +1,7 @@
 import pytest
 
+from orders.models import Bidding, Order
+
 
 @pytest.mark.django_db
 class TestBidCreateAPI:
@@ -93,6 +95,78 @@ class TestOrderCreateAPI:
     ):
         response = orders_api.create(authenticated_client, own_sell_bid.id)
         assert_api_error(response, 400, "INVALID_PARAMETER", "Cannot match your own bid.")
+
+
+@pytest.mark.django_db
+class TestBidCancelAPI:
+    def test_입찰취소_활성된_입찰을_취소한다(self, authenticated_client, bids_api, buy_bid):
+        response = bids_api.cancel(authenticated_client, buy_bid.id)
+        assert response.status_code == 200
+        assert response.json()["code"] == "OK"
+        buy_bid.refresh_from_db()
+        assert buy_bid.status == "CANCELLED"
+
+    def test_입찰취소_체결된_입찰은_취소할수없다(
+        self, seller_client, bids_api, contracted_sell_bid, assert_api_error,
+    ):
+        response = bids_api.cancel(seller_client, contracted_sell_bid.id)
+        assert_api_error(response, 409, "CONFLICT", "Only active bids can be cancelled.")
+
+    def test_입찰취소_타인입찰은_404를_반환한다(self, authenticated_client, bids_api, sell_bid):
+        response = bids_api.cancel(authenticated_client, sell_bid.id)
+        assert response.status_code == 404
+
+    def test_입찰취소_미인증시_401을_반환한다(self, api_client, bids_api, buy_bid):
+        response = bids_api.cancel(api_client, buy_bid.id)
+        assert response.status_code == 401
+
+
+@pytest.mark.django_db
+class TestOrderStatusUpdateAPI:
+    def _create_order(self, authenticated_client, orders_api, sell_bid):
+        orders_api.create(authenticated_client, sell_bid.id)
+        return Order.objects.get(bidding=sell_bid)
+
+    def test_주문상태변경_검수에서_배송으로_변경한다(
+        self, authenticated_client, seller_client, orders_api, sell_bid,
+    ):
+        order = self._create_order(authenticated_client, orders_api, sell_bid)
+        response = orders_api.update_status(seller_client, order.id, "IN_TRANSIT")
+        assert response.status_code == 200
+        order.refresh_from_db()
+        assert order.status == "IN_TRANSIT"
+
+    def test_주문상태변경_배송에서_완료로_변경한다(
+        self, authenticated_client, seller_client, orders_api, sell_bid,
+    ):
+        order = self._create_order(authenticated_client, orders_api, sell_bid)
+        orders_api.update_status(seller_client, order.id, "IN_TRANSIT")
+        response = orders_api.update_status(seller_client, order.id, "DELIVERED")
+        assert response.status_code == 200
+        order.refresh_from_db()
+        assert order.status == "DELIVERED"
+
+    def test_주문상태변경_역방향전이는_400을_반환한다(
+        self, authenticated_client, seller_client, orders_api, sell_bid, assert_api_error,
+    ):
+        order = self._create_order(authenticated_client, orders_api, sell_bid)
+        orders_api.update_status(seller_client, order.id, "IN_TRANSIT")
+        response = orders_api.update_status(seller_client, order.id, "INSPECTION")
+        assert_api_error(response, 400, "INVALID_PARAMETER", "Invalid status transition.")
+
+    def test_주문상태변경_판매자가아니면_403을_반환한다(
+        self, authenticated_client, orders_api, sell_bid,
+    ):
+        order = self._create_order(authenticated_client, orders_api, sell_bid)
+        response = orders_api.update_status(authenticated_client, order.id, "IN_TRANSIT")
+        assert response.status_code == 403
+
+    def test_주문상태변경_미인증시_접근불가(
+        self, api_client, authenticated_client, orders_api, sell_bid,
+    ):
+        order = self._create_order(authenticated_client, orders_api, sell_bid)
+        response = orders_api.update_status(api_client, order.id, "IN_TRANSIT")
+        assert response.status_code in (401, 403)
 
 
 @pytest.mark.django_db
