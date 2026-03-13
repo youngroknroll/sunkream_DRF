@@ -1,8 +1,10 @@
 import pytest
 from django.db import IntegrityError
 
-from products.models import Wishlist
+from orders.models import Bidding
+from products.models import Product, ProductSize, Wishlist
 from tests.factories import (
+    BiddingFactory,
     BrandFactory,
     ProductFactory,
     ProductImageFactory,
@@ -157,3 +159,101 @@ class TestWishlistAPI:
     ):
         response = products_api.add_wishlist(authenticated_client, not_found_id)
         assert response.status_code == 404
+
+
+@pytest.mark.django_db
+class TestProductAdminCreateAPI:
+    def _make_payload(self, brand, sizes=None):
+        payload = {
+            "brand_id": brand.id,
+            "name": "Air Jordan 1 Retro High OG",
+            "model_number": "DZ5485-612",
+            "release_price": 209000,
+            "thumbnail_url": "https://example.com/thumb.jpg",
+        }
+        if sizes is not None:
+            payload["sizes"] = sizes
+        return payload
+
+    def test_상품생성_관리자가_상품을_생성한다(self, admin_client, products_api):
+        brand = BrandFactory(name="Nike")
+        size = SizeFactory(size=270)
+        payload = self._make_payload(brand, sizes=[270])
+        response = products_api.create_product(admin_client, payload)
+        assert response.status_code == 201
+        assert response.json()["code"] == "OK"
+        assert Product.objects.filter(name="Air Jordan 1 Retro High OG").exists()
+        assert ProductSize.objects.filter(product__name="Air Jordan 1 Retro High OG", size=size).exists()
+
+    def test_상품생성_사이즈없이_생성한다(self, admin_client, products_api):
+        brand = BrandFactory()
+        payload = self._make_payload(brand)
+        response = products_api.create_product(admin_client, payload)
+        assert response.status_code == 201
+
+    def test_상품생성_존재하지않는_브랜드면_404를_반환한다(self, admin_client, products_api, not_found_id):
+        payload = {"brand_id": not_found_id, "name": "Test"}
+        response = products_api.create_product(admin_client, payload)
+        assert response.status_code == 404
+
+    def test_상품생성_존재하지않는_사이즈면_400을_반환한다(self, admin_client, products_api):
+        brand = BrandFactory()
+        payload = self._make_payload(brand, sizes=[999])
+        response = products_api.create_product(admin_client, payload)
+        assert response.status_code == 400
+
+    def test_상품생성_일반유저는_403을_반환한다(self, authenticated_client, products_api):
+        brand = BrandFactory()
+        payload = self._make_payload(brand)
+        response = products_api.create_product(authenticated_client, payload)
+        assert response.status_code == 403
+
+    def test_상품생성_미인증시_401을_반환한다(self, api_client, products_api):
+        brand = BrandFactory()
+        payload = self._make_payload(brand)
+        response = products_api.create_product(api_client, payload)
+        assert response.status_code == 401
+
+
+@pytest.mark.django_db
+class TestProductAdminUpdateAPI:
+    def test_상품수정_관리자가_이름을_수정한다(self, admin_client, products_api):
+        product = ProductFactory(name="Old Name")
+        response = products_api.update_product(admin_client, product.id, {"name": "New Name"})
+        assert response.status_code == 200
+        product.refresh_from_db()
+        assert product.name == "New Name"
+
+    def test_상품수정_부분수정이_가능하다(self, admin_client, products_api):
+        product = ProductFactory(release_price=100000)
+        response = products_api.update_product(admin_client, product.id, {"release_price": 200000})
+        assert response.status_code == 200
+        product.refresh_from_db()
+        assert product.release_price == 200000
+
+    def test_상품수정_일반유저는_403을_반환한다(self, authenticated_client, products_api):
+        product = ProductFactory()
+        response = products_api.update_product(authenticated_client, product.id, {"name": "X"})
+        assert response.status_code == 403
+
+
+@pytest.mark.django_db
+class TestProductAdminDeleteAPI:
+    def test_상품삭제_관리자가_상품을_삭제한다(self, admin_client, products_api):
+        product = ProductFactory()
+        response = products_api.delete_product(admin_client, product.id)
+        assert response.status_code == 204
+        assert not Product.objects.filter(pk=product.id).exists()
+
+    def test_상품삭제_활성입찰도_함께_삭제된다(self, admin_client, products_api):
+        ps = ProductSizeFactory()
+        bid = BiddingFactory(product_size=ps, position="SELL")
+        bid_id = bid.id
+        response = products_api.delete_product(admin_client, ps.product.id)
+        assert response.status_code == 204
+        assert not Bidding.objects.filter(pk=bid_id).exists()
+
+    def test_상품삭제_일반유저는_403을_반환한다(self, authenticated_client, products_api):
+        product = ProductFactory()
+        response = products_api.delete_product(authenticated_client, product.id)
+        assert response.status_code == 403

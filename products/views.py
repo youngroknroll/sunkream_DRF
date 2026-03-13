@@ -8,17 +8,23 @@ from rest_framework.response import Response
 from core.exceptions import ConflictError
 from core.mixins import SuccessResponseListMixin
 from core.responses import success_response
-from products.models import Brand, Product, Wishlist
+from products.models import Brand, Product, ProductSize, Size, Wishlist
 from products.serializers import (
     BrandSerializer,
+    ProductCreateSerializer,
     ProductDetailSerializer,
     ProductListSerializer,
+    ProductUpdateSerializer,
 )
 
 
-class ProductListView(SuccessResponseListMixin, generics.ListAPIView):
+class ProductListView(SuccessResponseListMixin, generics.ListCreateAPIView):
     serializer_class = ProductListSerializer
-    permission_classes = [permissions.AllowAny]
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [permissions.IsAdminUser()]
+        return [permissions.AllowAny()]
 
     def get_queryset(self):
         qs = Product.objects.select_related("brand").all()
@@ -37,11 +43,41 @@ class ProductListView(SuccessResponseListMixin, generics.ListAPIView):
 
         return qs.distinct()
 
+    def create(self, request, *args, **kwargs):
+        serializer = ProductCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        brand = Brand.objects.get(pk=data["brand_id"])
+        product = Product.objects.create(
+            brand=brand,
+            name=data["name"],
+            model_number=data["model_number"],
+            release_price=data["release_price"],
+            thumbnail_url=data["thumbnail_url"],
+        )
+
+        if data["sizes"]:
+            sizes = Size.objects.filter(size__in=data["sizes"])
+            ProductSize.objects.bulk_create(
+                [ProductSize(product=product, size=s) for s in sizes]
+            )
+
+        return success_response(
+            data={"id": product.id, "name": product.name},
+            message="Product created.",
+            status_code=status.HTTP_201_CREATED,
+        )
+
 
 class ProductDetailView(generics.RetrieveAPIView):
     serializer_class = ProductDetailSerializer
-    permission_classes = [permissions.AllowAny]
     lookup_field = "pk"
+
+    def get_permissions(self):
+        if self.request.method in ("PATCH", "DELETE"):
+            return [permissions.IsAdminUser()]
+        return [permissions.AllowAny()]
 
     def get_queryset(self):
         return Product.objects.select_related("brand").prefetch_related("images").annotate(
@@ -52,6 +88,25 @@ class ProductDetailView(generics.RetrieveAPIView):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return success_response(data=serializer.data)
+
+    def patch(self, request, *args, **kwargs):
+        product = self.get_object()
+        serializer = ProductUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        for field, value in serializer.validated_data.items():
+            setattr(product, field, value)
+        product.save(update_fields=list(serializer.validated_data.keys()))
+
+        return success_response(
+            data={"id": product.id, "name": product.name},
+            message="Product updated.",
+        )
+
+    def delete(self, request, *args, **kwargs):
+        product = self.get_object()
+        product.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BrandListView(generics.ListAPIView):
