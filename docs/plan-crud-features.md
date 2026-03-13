@@ -1,15 +1,16 @@
 # CRUD 기능 확장 계획
 
 > 3가지 기능: 주문 상태 변경, 입찰 취소, 상품 관리(Admin CRUD)
+> **상태: 구현 완료**
 
 ---
 
-## 1. 주문 상태 변경
+## 1. 주문 상태 변경 ✅
 
 ### 현재 상태
 
 - Order.Status: `INSPECTION` → `IN_TRANSIT` → `DELIVERED` (모델에 정의됨)
-- 상태 변경 API 없음 — 주문 생성 후 항상 `INSPECTION`에 머무름
+- ~~상태 변경 API 없음~~ → **구현 완료**
 
 ### 설계
 
@@ -20,7 +21,7 @@
 **비즈니스 규칙**:
 - 순방향 전이만 허용: `INSPECTION → IN_TRANSIT → DELIVERED`
 - 역방향 전이 불가 (400 Bad Request)
-- 판매자가 아닌 사용자가 요청 시 403 Forbidden
+- 판매자가 아닌 사용자가 요청 시 403 Forbidden (`ForbiddenError`)
 
 **요청/응답**:
 ```json
@@ -38,17 +39,17 @@
 | 파일 | 변경 내용 |
 |------|-----------|
 | `orders/views.py` | `OrderStatusUpdateView` 추가 |
-| `orders/serializers.py` | `OrderStatusUpdateSerializer` 추가 |
+| `orders/serializers.py` | `OrderStatusUpdateSerializer`, `VALID_STATUS_TRANSITIONS` 추가 |
 | `orders/urls.py` | URL 패턴 추가 |
-| `core/exceptions.py` | `ForbiddenError` 추가 (선택) |
-| `tests/test_orders.py` | 상태 변경 테스트 추가 |
+| `core/exceptions.py` | `ForbiddenError` 추가 |
+| `tests/test_orders.py` | 상태 변경 테스트 5건 추가 |
 
 ### 상태 전이 검증 로직
 
 ```python
-VALID_TRANSITIONS = {
-    "INSPECTION": "IN_TRANSIT",
-    "IN_TRANSIT": "DELIVERED",
+VALID_STATUS_TRANSITIONS = {
+    Order.Status.INSPECTION: Order.Status.IN_TRANSIT,
+    Order.Status.IN_TRANSIT: Order.Status.DELIVERED,
 }
 ```
 
@@ -56,23 +57,18 @@ VALID_TRANSITIONS = {
 
 ---
 
-## 2. 입찰 취소
+## 2. 입찰 취소 ✅
 
 ### 현재 상태
 
-- Bidding.Status: `ON_BIDDING`, `CONTRACTED`
-- 취소 기능 없음 — 한번 등록하면 변경/삭제 불가
+- Bidding.Status: `ON_BIDDING`, `CONTRACTED`, **`CANCELLED`** (추가됨)
+- ~~취소 기능 없음~~ → **구현 완료**
 
 ### 설계
 
-**방법 A — 새 상태 추가** (권장):
-- `CANCELLED` 상태를 Bidding.Status에 추가
+**채택: 방법 A — CANCELLED 상태 추가** (soft delete 패턴)
 - 기존 데이터/로직에 영향 최소화
 - PriceHistoryView 등에서 `ON_BIDDING` 필터 이미 적용되어 있어 호환성 좋음
-
-**방법 B — 레코드 삭제**:
-- DB에서 실제 삭제
-- 이력 추적 불가 → 비추천
 
 **엔드포인트**: `DELETE /api/v1/bids/<int:bid_id>/`
 
@@ -89,7 +85,7 @@ VALID_TRANSITIONS = {
 { "code": "OK", "message": "Bid cancelled." }
 
 // Error (409)
-{ "code": "CONFLICT", "message": "Contracted bid cannot be cancelled." }
+{ "code": "CONFLICT", "message": "Only active bids can be cancelled." }
 ```
 
 **변경 파일**:
@@ -98,136 +94,102 @@ VALID_TRANSITIONS = {
 | `orders/models.py` | `Bidding.Status`에 `CANCELLED` 추가 |
 | `orders/views.py` | `BidCancelView` 추가 |
 | `orders/urls.py` | URL 패턴 추가 |
-| `tests/test_orders.py` | 입찰 취소 테스트 추가 |
-
-### 마이그레이션 영향
-
-- `CANCELLED` 상태 추가는 기존 데이터에 영향 없음 (새 choice 값만 추가)
-- `MyOrdersView`의 `active_bids` 쿼리는 이미 `status=ON_BIDDING` 필터 → 호환
+| `tests/test_orders.py` | 입찰 취소 테스트 4건 추가 |
 
 ---
 
-## 3. 상품 관리 (Admin CRUD)
+## 3. 상품 관리 (Admin CRUD) ✅
 
 ### 현재 상태
 
-- 상품 조회(List/Detail)만 존재
-- 생성/수정/삭제 API 없음
-- KREAM은 관리자만 상품 등록 가능 (사용자는 입찰만)
+- ~~상품 조회(List/Detail)만 존재~~ → **CRUD 전체 구현 완료**
 
 ### 설계
 
 **권한**: `IsAdminUser` — 관리자(is_staff=True)만 접근 가능
 
+**채택: 기존 경로 공유** (method-based `get_permissions()` 분리)
+- 별도 `/admin/` prefix 없이 기존 endpoint에서 GET=AllowAny, POST/PATCH/DELETE=IsAdminUser
+- 오버코딩 방지, DRF의 `get_permissions()` 패턴 활용
+
 **엔드포인트**:
 
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| POST | `/api/v1/products/` | 상품 생성 |
-| PATCH | `/api/v1/products/<int:pk>/` | 상품 수정 |
-| DELETE | `/api/v1/products/<int:pk>/` | 상품 삭제 |
-
-**상품 생성 요청**:
-```json
-{
-  "brand_id": 1,
-  "name": "Air Jordan 1 Retro High OG",
-  "model_number": "DZ5485-612",
-  "release_price": 209000,
-  "thumbnail_url": "https://...",
-  "sizes": [250, 260, 270, 280]
-}
-```
-
-**상품 수정 요청** (부분 수정 지원):
-```json
-{
-  "name": "Air Jordan 1 Retro High OG Chicago",
-  "release_price": 219000
-}
-```
+| POST | `/api/v1/products/` | 상품 생성 (Admin) |
+| PATCH | `/api/v1/products/<int:pk>/` | 상품 수정 (Admin) |
+| DELETE | `/api/v1/products/<int:pk>/` | 상품 삭제 (Admin) |
 
 **비즈니스 규칙**:
 - 상품 생성 시 `brand_id`는 기존 Brand 참조 필수 (없으면 404)
-- `sizes` 배열의 각 값은 Size 테이블에 존재해야 함 (없으면 자동 생성 or 404 — 확인 필요)
-- 상품 삭제 시 연관된 활성 입찰(ON_BIDDING)이 있으면 삭제 불가 (409 Conflict)
-- 상품 수정 시 `sizes`는 별도 엔드포인트로 분리 가능 (복잡도 관리)
+- `sizes` 배열의 각 값은 Size 테이블에 존재해야 함 (**없으면 에러** — 자동 생성 안함)
+- 상품 삭제 시 **활성 입찰 연쇄 취소 후 삭제** (`pre_delete` signal)
 
 **변경 파일**:
 | 파일 | 변경 내용 |
 |------|-----------|
-| `products/views.py` | `ProductCreateView`, `ProductUpdateView`, `ProductDeleteView` 추가 |
+| `products/views.py` | `ProductListView` → `ListCreateAPIView`, `ProductDetailView`에 `patch()`/`delete()` 추가 |
 | `products/serializers.py` | `ProductCreateSerializer`, `ProductUpdateSerializer` 추가 |
-| `products/urls.py` | URL 패턴 추가 |
-| `core/exceptions.py` | 필요 시 예외 추가 |
-| `tests/test_products.py` | Admin CRUD 테스트 추가 |
+| `tests/test_products.py` | Admin CRUD 테스트 12건 추가 |
 
-### URL 설계 고려사항
+### Signal 기반 앱 간 결합 분리
 
-기존 `ProductListView`(GET)와 `ProductCreateView`(POST)가 같은 경로(`/api/v1/products/`)를 공유할 수 있음:
-- **방법 A**: `ProductListView`를 `ListCreateAPIView`로 변경 (권한 분리 필요)
-- **방법 B**: 별도 Admin prefix 사용 — `POST /api/v1/admin/products/`
+상품 삭제 시 활성 입찰 취소 로직을 `products` 앱에서 직접 처리하면 `orders` 앱과의 양방향 결합이 발생.
 
-**방법 B 권장** — 권한 분리가 명확하고 기존 코드 수정 최소화.
+**해결**: `orders/signals.py`에 `pre_delete` signal 등록
 
----
-
-## 구현 순서
-
-```
-Phase 1: 입찰 취소 (가장 단순, 모델 변경 포함)
-  ├── models.py — CANCELLED 상태 추가
-  ├── views.py — BidCancelView
-  ├── urls.py — URL 추가
-  ├── migration 생성/적용
-  └── tests — 취소 성공/실패 케이스
-
-Phase 2: 주문 상태 변경 (모델 변경 없음)
-  ├── serializers.py — OrderStatusUpdateSerializer
-  ├── views.py — OrderStatusUpdateView
-  ├── urls.py — URL 추가
-  └── tests — 전이 성공/실패, 권한 케이스
-
-Phase 3: 상품 Admin CRUD (가장 복잡)
-  ├── serializers.py — Create/Update serializer
-  ├── views.py — Create/Update/Delete views
-  ├── urls.py — Admin URL 추가
-  └── tests — CRUD 전체 + 권한 + 삭제 제약
+```python
+# orders/signals.py
+@receiver(pre_delete, sender=Product)
+def cancel_active_bids_on_product_delete(sender, instance, **kwargs):
+    Bidding.objects.filter(
+        product_size__product=instance,
+        status=Bidding.Status.ON_BIDDING,
+    ).update(status=Bidding.Status.CANCELLED)
 ```
 
----
-
-## 의사결정 필요 사항
-
-| # | 질문 | 선택지 | 권장 |
-|---|------|--------|------|
-| 1 | 입찰 취소 방식 | A: CANCELLED 상태 추가 / B: DB 삭제 | **A** (이력 보존) |
-| 2 | 상품 Admin URL | A: 기존 경로 공유 / B: `/admin/` prefix | **B** (권한 분리 명확) |
-| 3 | 상품 생성 시 없는 Size | A: 자동 생성 / B: 404 에러 | 확인 필요 |
-| 4 | 상품 삭제 시 활성 입찰 존재 | A: 삭제 불가(409) / B: 연쇄 취소 후 삭제 | **A** (안전) |
+- `orders` → `products` 방향 참조만 유지 (단방향)
+- `products` 앱은 `orders` 앱의 존재를 알 필요 없음
+- `orders/apps.py`의 `ready()`에서 signal 모듈 import
 
 ---
 
-## 테스트 계획
+## 의사결정 결과
+
+| # | 질문 | 선택 | 이유 |
+|---|------|------|------|
+| 1 | 입찰 취소 방식 | **A: CANCELLED 상태 추가** | 이력 보존, 기존 쿼리 호환 |
+| 2 | 상품 Admin URL | **A: 기존 경로 공유** | 오버코딩 방지, get_permissions() 활용 |
+| 3 | 상품 생성 시 없는 Size | **B: 에러 반환** | 데이터 정합성 우선 |
+| 4 | 상품 삭제 시 활성 입찰 | **B: 연쇄 취소 후 삭제** | pre_delete signal로 결합 분리 |
+
+---
+
+## 테스트 결과 (83건 전체 통과)
 
 ### Phase 1: 입찰 취소
-- [ ] ON_BIDDING 입찰 취소 성공
-- [ ] CONTRACTED 입찰 취소 실패 (409)
-- [ ] 타인 입찰 취소 시도 (404)
-- [ ] 미인증 사용자 (401)
+- [x] ON_BIDDING 입찰 취소 성공
+- [x] CONTRACTED 입찰 취소 실패 (409)
+- [x] 타인 입찰 취소 시도 (404)
+- [x] 미인증 사용자 (401/403)
 
 ### Phase 2: 주문 상태 변경
-- [ ] INSPECTION → IN_TRANSIT 성공
-- [ ] IN_TRANSIT → DELIVERED 성공
-- [ ] 역방향 전이 실패 (400)
-- [ ] 판매자가 아닌 사용자 (403)
-- [ ] 미인증 사용자 (401)
+- [x] INSPECTION → IN_TRANSIT 성공
+- [x] IN_TRANSIT → DELIVERED 성공
+- [x] 역방향 전이 실패 (400)
+- [x] 판매자가 아닌 사용자 (403)
+- [x] 미인증 사용자 (401/403)
 
 ### Phase 3: 상품 Admin CRUD
-- [ ] Admin 상품 생성 성공
-- [ ] Admin 상품 수정 성공 (부분 수정)
-- [ ] Admin 상품 삭제 성공
-- [ ] 활성 입찰 있는 상품 삭제 실패 (409)
-- [ ] 일반 사용자 접근 (403)
-- [ ] 미인증 사용자 (401)
-- [ ] 존재하지 않는 brand_id (404)
+- [x] Admin 상품 생성 성공
+- [x] Admin 상품 수정 성공 (부분 수정)
+- [x] Admin 상품 삭제 성공
+- [x] 활성 입찰 있는 상품 삭제 → 연쇄 취소 확인
+- [x] 일반 사용자 접근 (403)
+- [x] 미인증 사용자 (401/403)
+- [x] 존재하지 않는 brand_id (404)
+- [x] 존재하지 않는 size (400)
+- [x] 필수 필드 누락 (400)
+- [x] 빈 요청 수정 (200)
+- [x] 삭제 시 활성 입찰 연쇄 취소
+- [x] 삭제 시 204 No Content

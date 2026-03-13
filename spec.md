@@ -56,38 +56,56 @@
 
 ---
 
-## Feature 4: 입찰 취소 (미구현)
+## Feature 4: 입찰 취소
 
 ### 요구사항
-1. ON_BIDDING 상태 입찰만 취소 가능
-2. CONTRACTED 입찰은 취소 불가
-3. 본인 입찰만 취소 가능
+1. ON_BIDDING 상태 입찰만 취소 가능 (CANCELLED 상태로 변경)
+2. CONTRACTED 입찰은 취소 불가 (409 Conflict)
+3. 본인 입찰만 취소 가능 (타인 입찰은 404)
 
 ### API 명세
 - `DELETE /api/v1/bids/<id>/` — 입찰 취소
 
+### 구현 상세
+- `Bidding.Status`에 `CANCELLED` 추가 (soft delete 패턴)
+- `BidCancelView` — `orders/views.py`
+- 테스트 4건: 성공 / CONTRACTED 실패 / 타인 입찰 / 미인증
+
 ---
 
-## Feature 5: 주문 상태 변경 (미구현)
+## Feature 5: 주문 상태 변경
 
 ### 요구사항
-1. 판매자만 상태 변경 가능
+1. 판매자(seller)만 상태 변경 가능 (403 Forbidden)
 2. 순방향 전이만 허용: INSPECTION → IN_TRANSIT → DELIVERED
-3. 역방향 전이 불가
+3. 역방향 전이 불가 (400 ValidationError)
 
 ### API 명세
 - `PATCH /api/v1/orders/<id>/status/` — 주문 상태 변경
 
+### 구현 상세
+- `VALID_STATUS_TRANSITIONS` dict으로 상태 전이 검증
+- `ForbiddenError` 커스텀 예외 (`core/exceptions.py`)
+- `OrderStatusUpdateSerializer` / `OrderStatusUpdateView`
+- 테스트 5건: 순방향 2건 / 역방향 / 비판매자 / 미인증
+
 ---
 
-## Feature 6: 상품 관리 Admin CRUD (미구현)
+## Feature 6: 상품 관리 Admin CRUD
 
 ### 요구사항
 1. 관리자(is_staff)만 상품 생성/수정/삭제 가능
-2. 상품 생성 시 사이즈 목록 함께 등록
-3. 활성 입찰 있는 상품은 삭제 불가
+2. 상품 생성 시 사이즈 목록 함께 등록 (없는 Size는 에러)
+3. 상품 삭제 시 활성 입찰 연쇄 취소 후 삭제 (`pre_delete` signal)
 
-### API 명세
-- `POST /api/v1/admin/products/` — 상품 생성
-- `PATCH /api/v1/admin/products/<id>/` — 상품 수정
-- `DELETE /api/v1/admin/products/<id>/` — 상품 삭제
+### API 명세 (기존 경로 공유, method-based 권한 분리)
+- `POST /api/v1/products/` — 상품 생성 (Admin)
+- `PATCH /api/v1/products/<id>/` — 상품 수정 (Admin)
+- `DELETE /api/v1/products/<id>/` — 상품 삭제 (Admin)
+
+### 구현 상세
+- `ProductListView` → `ListCreateAPIView`로 변경, `get_permissions()`로 POST=Admin/GET=AllowAny 분리
+- `ProductDetailView`에 `patch()`/`delete()` 추가, PATCH/DELETE=Admin
+- `ProductCreateSerializer` / `ProductUpdateSerializer` — `products/serializers.py`
+- `orders/signals.py` — `pre_delete` signal로 상품 삭제 시 활성 입찰 연쇄 취소 (앱 간 결합 방지)
+- 테스트 12건: 생성 6건 / 수정 3건 / 삭제 3건
