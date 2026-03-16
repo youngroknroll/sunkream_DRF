@@ -145,23 +145,24 @@ class OrderStatusUpdateView(generics.GenericAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def patch(self, request, order_id):
-        try:
-            order = Order.objects.get(pk=order_id)
-        except Order.DoesNotExist:
-            raise NotFound("Order not found.")
+        with transaction.atomic():
+            try:
+                order = Order.objects.select_for_update().get(pk=order_id)
+            except Order.DoesNotExist:
+                raise NotFound("Order not found.")
 
-        if order.seller != request.user:
-            raise ForbiddenError("Only the seller can update order status.")
+            if order.seller != request.user:
+                raise ForbiddenError("Only the seller can update order status.")
 
-        serializer = OrderStatusUpdateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        new_status = serializer.validated_data["status"]
+            serializer = OrderStatusUpdateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            new_status = serializer.validated_data["status"]
 
-        if VALID_STATUS_TRANSITIONS.get(order.status) != new_status:
-            raise ValidationError("Invalid status transition.")
+            if VALID_STATUS_TRANSITIONS.get(order.status) != new_status:
+                raise ValidationError("Invalid status transition.")
 
-        order.status = new_status
-        order.save(update_fields=["status"])
+            order.status = new_status
+            order.save(update_fields=["status"])
 
         return success_response(data={"id": order.id, "status": order.status}, message="Order status updated.")
 
@@ -170,16 +171,21 @@ class BidCancelView(generics.GenericAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def delete(self, request, bid_id):
-        try:
-            bidding = Bidding.objects.get(pk=bid_id, user=request.user)
-        except Bidding.DoesNotExist:
-            raise NotFound("Bidding not found.")
+        with transaction.atomic():
+            try:
+                bidding = (
+                    Bidding.objects
+                    .select_for_update()
+                    .get(pk=bid_id, user=request.user)
+                )
+            except Bidding.DoesNotExist:
+                raise NotFound("Bidding not found.")
 
-        if bidding.status != Bidding.Status.ON_BIDDING:
-            raise ConflictError("Only active bids can be cancelled.")
+            if bidding.status != Bidding.Status.ON_BIDDING:
+                raise ConflictError("Only active bids can be cancelled.")
 
-        bidding.status = Bidding.Status.CANCELLED
-        bidding.save(update_fields=["status"])
+            bidding.status = Bidding.Status.CANCELLED
+            bidding.save(update_fields=["status"])
 
         return success_response(message="Bid cancelled.")
 
