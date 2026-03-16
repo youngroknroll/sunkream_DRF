@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache
+dist/
+build/
+
+# venv
+.venv/
+
+# Django
+db.sqlite3
+*.log
+staticfiles/
+mediafiles/
+
+# Environment
+.env
+.env.docker
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# uv
+.python-version
+
+# docs
+.docs
+
+.gitignore
+
+#mac
+.DS_Store
+
+# Claude Code
+.claude/handoff.md
+.claude/checkpoints/
+.claude/web-checklist-state.json
